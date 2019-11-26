@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Hello World!</title>
+    <!-- https://electronjs.org/docs/tutorial/security#csp-meta-tag -->
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';" />
+  </head>
+  <body>
+    <form>
+      <button onClick="chooseVideo(event)">Escolher video</button>
+      <div id="videoFile">...</div>
+      <input type="text" id="headline" placeholer="headline" />
+      <button onClick="process(event)">Go!</button>
+      <div id="log"></div>
+    </form>
+
+    <script src="app.js"></script>
+    <script>
+      const ffbinaries = require('ffbinaries');
+      const {dialog} = require('electron').remote;
+      const path = require('path');
+      const { spawn, execFileSync } = require('child_process');
+
+      const speech = require('@google-cloud/speech');
+      const fs = require('fs');
+
+
+      var ffmpeg = null;
+      var videoFilename = null;
+
+      function init() {
+        log.innerText = 'Downloading ffmpeg';
+        ffbinaries.downloadBinaries(['ffmpeg'], {}, function (err, data) {
+          console.log('Downloaded all ffmpeg binaries for current platform.', err, data);
+          log.innerText = '';
+          const result = data[0];
+          ffmpeg = path.join(result.path, result.filename);
+        });
+      }
+
+      init();
+
+      function chooseVideo(e) {
+        e.preventDefault();
+
+        const [filename] = dialog.showOpenDialogSync();
+        videoFilename = filename;
+        videoFile.innerText = videoFilename;
+        extractAudio().then(stt);
+      }
+
+      function extractAudio() {
+        if (! ffmpeg) {
+          alert('ooops!');
+          return Promise.reject();
+        }
+        const fileExt = videoFilename.split('.').pop();
+        const output = videoFilename.replace(fileExt, 'flac');
+        if (fs.existsSync(output)) return Promise.resolve(output);
+
+        const p = spawn(ffmpeg, ['-i', videoFilename, output]);
+        p.on('error', (err) => {
+          console.error('Failed to start subprocess.', err);
+        });
+        p.stderr.on('data', (data) => {
+          log.innerText += `${data}`;
+        });
+        p.stdout.on('data', (data) => {
+          log.innerText += `${data}`;
+        });
+        p.on('close', (code) => {
+          log.innerText += `child process exited with code ${code}`;
+        });
+        return new Promise(resolve => {
+            p.on('exit', () => {
+              log.innerText += JSON.stringify(arguments);
+              resolve(output);
+            });
+        });
+      }
+
+      function stt(filename) {
+        const output = filename.replace('flac', 'srt');
+        console.log({ output, filename });
+        if (fs.existsSync(output)) return Promise.resolve(output);
+
+        console.log('?');
+        const file = fs.readFileSync(fileName);
+        const audioBytes = file.toString('base64');
+        const audio = {
+          content: audioBytes,
+        };
+        const config = {
+          encoding: 'LINEAR16',
+          sampleRateHertz: 16000,
+          languageCode: 'pt-BR',
+        };
+        const request = {
+          audio: audio,
+          config: config,
+        };
+        console.log('!!');
+        return client.recognize(request).then(([response]) => {
+          console.log('??', response);
+          const transcription = response.results
+            .map(result => result.alternatives[0].transcript)
+            .join('\n');
+          fs.writeFileSync(transcript);
+          return output;
+        });
+      }
+
+      function process(e) {
+        e.preventDefault();
+        if (! ffmpeg) return;
+        const fileExt = videoFilename.split('.').pop();
+        const prefix = videoFilename.replace(fileExt, '');
+        const outputFilename = prefix + 'generated.' + fileExt;
+
+        const headline_part = headlineCLI('ahaha', prefix);
+        const videoFilters = [
+            // 1080px width
+            'scale=1080:-2',
+            // pad in middle
+            'pad=1080:1080:0:540:white',
+            headline_part,
+        ].join(',');
+
+        const args = [
+          '-i',
+          videoFilename,
+          '-y',
+          '-vf',
+          videoFilters,
+          outputFilename,
+        ]
+        console.log({ args });
+        const p = spawn(ffmpeg, args);
+        p.on('error', (err) => {
+          console.error('Failed to start subprocess.', err);
+        });
+        p.stderr.on('data', (data) => {
+          log.innerText += `${data}`;
+        });
+        p.stdout.on('data', (data) => {
+          log.innerText += `${data}`;
+        });
+        p.on('close', (code) => {
+          log.innerText += `child process exited with code ${code}`;
+        });
+        p.on('exit', () => log.innerText += JSON.stringify(arguments));
+      }
+
+      function generage_style(headline_fmt) {
+        return Object.keys(headline_fmt).map(k => `${k}=${headline_fmt[k]}`).join(',');
+      }
+
+      function headlineCLI(text, prefix) {
+        const headline_filename = `${prefix}headline.srt`;
+        fs.writeFileSync(headline_filename, `1\n00:00:00,000 --> 10:00:05,000\n${headline}`);
+
+        const headline_position = '235'
+        const headline_color = '3300FF'
+        const headline_size = '18'
+        const headline_fmt = {
+            'Alignment': '2',
+            // 'Angle': '0',
+            'BackColour': '&H00000000',
+            'Bold': '1',
+            'BorderStyle': '1',
+            'Encoding': '1',
+            'FontName': 'Ubuntu,sans-serif',
+            'Fontsize': headline_size,
+            'Italic': '1',
+            'MarginL': '10',
+            'MarginR': '10',
+            'MarginV': headline_position,
+            'Outline': '0',
+            'OutlineColour': '&H00000000',
+            'PrimaryColour': `&H0${headline_color}`,
+            'SecondaryColour': '&H000000FF',
+            'Shadow': '0',
+            'Spacing': '0',
+            'StrikeOut': '0',
+            'Underline': '0'
+        };
+
+        return `subtitles='${headline_filename}':force_style='${generage_style(headline_fmt)}'`
+      }
+
+    </script>
+  </body>
+</html>
